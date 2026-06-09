@@ -230,7 +230,11 @@ export const useGroupStore = create((set, get) => ({
         }
       }
 
-      set({ groupMessages: [...get().groupMessages, displayMessage] });
+      // Guard: skip if this message was already added optimistically (sender's own message)
+      const alreadyExists = get().groupMessages.some((m) => m._id === displayMessage._id);
+      if (!alreadyExists) {
+        set({ groupMessages: [...get().groupMessages, displayMessage] });
+      }
     });
 
     socket.on("userJoinedGroup", ({ groupId }) => {

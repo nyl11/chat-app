@@ -153,7 +153,11 @@ export const useChatStore = create((set, get) => ({
         }
       }
 
-      set({ messages: [...get().messages, displayMessage] });
+      // Guard: skip if this message was already added optimistically (sender's own message)
+      const alreadyExists = get().messages.some((m) => m._id === displayMessage._id);
+      if (!alreadyExists) {
+        set({ messages: [...get().messages, displayMessage] });
+      }
     });
   },
 
