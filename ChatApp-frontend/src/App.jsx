@@ -5,24 +5,34 @@ import LoginPage from './pages/LoginPage'
 import SettingsPage from './pages/SettingsPage'
 import ProfilePage from './pages/ProfilePage'
 import SignUpPage from './pages/SignUpPage'
+import FriendsPage from './pages/FriendsPage'
+import GroupsPage from './pages/GroupsPage'
 import { useAuthStore } from './store/useAuthStore'
+import { useFriendStore } from './store/useFriendStore'
 import { useEffect } from 'react'
 import { useThemeStore } from './store/useThemeStore'
 import { Loader } from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 
-
-
 const App = () => {
   const { authUser, checkAuth, isCheckingAuth, onlineUsers } = useAuthStore();
   const { theme } = useThemeStore();
-  console.log({ onlineUsers });
+  const { subscribeToFriendEvents, unsubscribeFromFriendEvents, getFriendRequests } = useFriendStore();
 
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
 
-  console.log({ authUser });
+  // Subscribe to friend request socket events once authenticated
+  useEffect(() => {
+    if (authUser) {
+      getFriendRequests();
+      subscribeToFriendEvents();
+    }
+    return () => {
+      unsubscribeFromFriendEvents();
+    };
+  }, [authUser]);
 
   if (isCheckingAuth && !authUser) return (
     <div className="flex items-center justify-center h-screen">
@@ -48,6 +58,9 @@ const App = () => {
 
         <Route path='/profile' element={authUser ? <ProfilePage /> : <Navigate to="/login" />} />
 
+        <Route path='/friends' element={authUser ? <FriendsPage /> : <Navigate to="/login" />} />
+
+        <Route path='/groups' element={authUser ? <GroupsPage /> : <Navigate to="/login" />} />
       </Routes>
     </div>
   )

@@ -181,3 +181,32 @@ export const googleSignup = async (req, res) => {
     res.status(400).json({ message: "Invalid Google token" });
   }
 };
+
+// ─── E2EE Public Key Routes ───────────────────────────────────
+
+// Save the logged-in user's ECDH public key
+// Called once after every login/signup from the frontend
+export const publishPublicKey = async (req, res) => {
+  try {
+    const { publicKey } = req.body;
+    if (!publicKey) return res.status(400).json({ message: "publicKey is required" });
+
+    await User.findByIdAndUpdate(req.user._id, { publicKey });
+    res.status(200).json({ message: "Public key saved" });
+  } catch (error) {
+    console.log("error in publishPublicKey:", error.message);
+    res.status(500).json({ message: "internal server error" });
+  }
+};
+
+// Get any user's public key so the caller can encrypt messages to them
+export const getPublicKey = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select("publicKey");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.status(200).json({ publicKey: user.publicKey });
+  } catch (error) {
+    console.log("error in getPublicKey:", error.message);
+    res.status(500).json({ message: "internal server error" });
+  }
+};
