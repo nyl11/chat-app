@@ -3,13 +3,16 @@ import Message from "../models/message.model.js"
 import cloudinary from "../lib/cloudinary.js"
 import { getReceiverSocketId, io } from "../lib/socket.js";
 
+// Get friends for the sidebar (replaces all-users list)
 export const getUsersForSidebar = async (req, res) => {
     try {
         const loggedInUserId = req.user._id;
 
-        const filteredUsers = await User.find({ _id: { $ne: loggedInUserId } }).select("-password")
+        const me = await User.findById(loggedInUserId)
+            .select("friends")
+            .populate("friends", "-password");
 
-        res.status(200).json(filteredUsers);
+        res.status(200).json(me.friends);
     } catch (error) {
         console.log("error in getUsersForSidebar:", error.message);
         res.status(500).json({ message: "internal server error" });
@@ -21,16 +24,23 @@ export const getMessages = async (req, res) => {
         const { id: userToChatId } = req.params
         const myId = req.user._id;
 
+        // Friend guard — only friends can read each other's DMs
+        const me = await User.findById(myId).select("friends");
+        const isFriend = me.friends.some(
+            (fId) => fId.toString() === userToChatId
+        );
+        if (!isFriend) {
+            return res.status(403).json({ message: "You can only chat with friends" });
+        }
+
         const message = await Message.find({
             $or: [
                 { senderId: myId, reciverId: userToChatId },
                 { senderId: userToChatId, reciverId: myId }
             ]
-
         })
 
         res.status(200).json(message);
-
 
     } catch (error) {
         console.log("error in getMessages controller:", error.message);
@@ -40,9 +50,18 @@ export const getMessages = async (req, res) => {
 
 export const sendMessages = async (req, res) => {
     try {
-        const { text, image } = req.body;
+        const { text, image, iv, isEncrypted } = req.body;
         const { id: reciverId } = req.params;
         const senderId = req.user._id;
+
+        // Friend guard — only friends can send each other DMs
+        const me = await User.findById(senderId).select("friends");
+        const isFriend = me.friends.some(
+            (fId) => fId.toString() === reciverId
+        );
+        if (!isFriend) {
+            return res.status(403).json({ message: "You can only chat with friends" });
+        }
 
         let imageUrl;
         if (image) {
@@ -56,6 +75,8 @@ export const sendMessages = async (req, res) => {
             reciverId,
             text,
             image: imageUrl,
+            iv: iv || null,
+            isEncrypted: isEncrypted || false,
         });
 
         await newMessage.save();
@@ -65,7 +86,6 @@ export const sendMessages = async (req, res) => {
         if (receiverSocketId) {
             io.to(receiverSocketId).emit("newMessage", newMessage);
         }
-
 
         res.status(201).json(newMessage);
     }

@@ -20,6 +20,16 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    publicKey: {
+      type: String,
+      default: "", // base64-encoded ECDH P-256 public key for E2EE
+    },
+    friends: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
   },
   { timestamps: true }
 );
