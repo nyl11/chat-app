@@ -1,17 +1,11 @@
-// ============================================================
 // crypto.js — End-to-End Encryption using Web Crypto API only
-// No external libraries required.
-// ============================================================
-
 const DB_NAME = "ChatAppE2EE";
 const DB_VERSION = 1;
 const STORE_NAME = "keys";
 
-// ─────────────────────────────────────────────────────────────
+
 // IndexedDB helpers — private keys are stored here securely.
 // Unlike localStorage, IndexedDB can hold real CryptoKey objects.
-// ─────────────────────────────────────────────────────────────
-
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -43,9 +37,8 @@ async function loadFromIDB(key) {
   });
 }
 
-// ─────────────────────────────────────────────────────────────
 // Base64 helpers — convert raw bytes ↔ base64 strings
-// ─────────────────────────────────────────────────────────────
+
 
 export function bufferToBase64(buffer) {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)));
@@ -60,7 +53,7 @@ export function base64ToBuffer(base64) {
   return bytes.buffer;
 }
 
-// ─────────────────────────────────────────────────────────────
+
 // ECDH Key Pair Generation
 //
 // Each user generates ONE key pair (private + public).
@@ -71,7 +64,7 @@ export function base64ToBuffer(base64) {
 // getOrCreateKeyPair() is idempotent:
 //   First call  → generates new key pair and saves to IndexedDB
 //   Later calls → loads the existing pair from IndexedDB
-// ─────────────────────────────────────────────────────────────
+ß
 
 export async function getOrCreateKeyPair(userId) {
   const existingPrivate = await loadFromIDB(`privateKey_${userId}`);
