@@ -50,7 +50,7 @@ export const getMessages = async (req, res) => {
 
 export const sendMessages = async (req, res) => {
     try {
-        const { text, image, iv, isEncrypted } = req.body;
+        const { text, image, iv, mac, isEncrypted } = req.body;
         const { id: reciverId } = req.params;
         const senderId = req.user._id;
 
@@ -76,6 +76,7 @@ export const sendMessages = async (req, res) => {
             text,
             image: imageUrl,
             iv: iv || null,
+            mac: mac || null,
             isEncrypted: isEncrypted || false,
         });
 

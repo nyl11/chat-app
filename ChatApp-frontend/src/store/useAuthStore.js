@@ -2,18 +2,17 @@ import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import { toast } from "react-hot-toast";
 import { io } from "socket.io-client";
-import { getOrCreateKeyPair, exportPublicKey, clearSharedKeyCache } from "../lib/crypto";
+import { getOrPublishDMKey, clearDMSecretCache } from "../lib/dmCryptoOps";
 
 const SOCKET_URL = import.meta.env.MODE === "development" ? "http://localhost:5001" : "/";
 
-// Called after every login/signup to generate or load the user's ECDH key pair
-// and publish the public key to the server so others can encrypt messages to them.
-async function setupE2EE(userId) {
+// Called after every login/signup/checkAuth to ensure our P-256 ECDH key pair
+// is generated (or loaded from IndexedDB) and the public key is published to the
+// server. Uses the pure-JS ECDH stack shared with group chat.
+async function setupE2EE(authUser) {
   try {
-    const keyPair = await getOrCreateKeyPair(userId);
-    const publicKeyBase64 = await exportPublicKey(keyPair.publicKey);
-    await axiosInstance.put("/auth/publish-key", { publicKey: publicKeyBase64 });
-    console.log("✅ E2EE keys ready");
+    const { publicKeyB64 } = await getOrPublishDMKey(authUser);
+    console.log("✅ E2EE keys ready | publicKey:", publicKeyB64.slice(0, 20) + "...");
   } catch (err) {
     console.error("E2EE setup failed:", err);
   }
@@ -33,7 +32,7 @@ export const useAuthStore = create((set, get) => ({
       const res = await axiosInstance.get("/auth/check");
       set({ authUser: res.data });
       get().connectSocket();
-      await setupE2EE(res.data._id); // generate/load keys and publish public key
+      await setupE2EE(res.data); // generate/load keys and publish public key
     } catch (error) {
       console.log("error in checkAuth:", error);
       set({ authUser: null });
@@ -49,7 +48,7 @@ export const useAuthStore = create((set, get) => ({
       set({ authUser: res.data });
       toast.success("Account Created Successfully!");
       get().connectSocket();
-      await setupE2EE(res.data._id); // generate/load keys and publish public key
+      await setupE2EE(res.data); // generate/load keys and publish public key
 
     } catch (error) {
       toast.error(error.response?.data?.message || "Signup failed");
@@ -67,7 +66,7 @@ export const useAuthStore = create((set, get) => ({
       set({ authUser: res.data });
       toast.success("Authentication successful!");
       get().connectSocket();
-      await setupE2EE(res.data._id); // generate/load keys and publish public key
+      await setupE2EE(res.data); // generate/load keys and publish public key
 
     } catch (error) {
       toast.error(
@@ -85,7 +84,7 @@ export const useAuthStore = create((set, get) => ({
       set({ authUser: res.data });
       toast.success("Logged in successfully!");
       get().connectSocket();
-      await setupE2EE(res.data._id); // generate/load keys and publish public key
+      await setupE2EE(res.data); // generate/load keys and publish public key
 
     } catch (error) {
       toast.error(error.response?.data?.message || "Login failed");
@@ -99,7 +98,7 @@ export const useAuthStore = create((set, get) => ({
       await axiosInstance.post("/auth/logout");
       set({ authUser: null });
       toast.success("Logged out successfully");
-      clearSharedKeyCache(); // clear in-memory AES key cache on logout
+      clearDMSecretCache(); // clear in-memory DM shared secret cache on logout
       get().disconnectSocket();
 
     } catch (error) {

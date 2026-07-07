@@ -16,7 +16,10 @@ const groupMessageSchema = new mongoose.Schema(
       type: String, // stores base64 ciphertext when isEncrypted=true
     },
     iv: {
-      type: String, // base64 IV used for AES-GCM encryption
+      type: String, // base64 IV (nonce) used for AES-CTR encryption
+    },
+    mac: {
+      type: String, // base64 HMAC-SHA-256 of (iv || ciphertext) — Encrypt-then-MAC
     },
     isEncrypted: {
       type: Boolean,

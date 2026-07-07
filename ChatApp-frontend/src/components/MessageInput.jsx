@@ -45,7 +45,7 @@ import toast from "react-hot-toast";
       if (fileInputRef.current) fileInputRef.current.value = "";
 
     } catch (error) {
-      toast.error("Failed to send message",error);
+      toast.error(`Failed to send message: ${error.message}`);
     }
   };
 

@@ -69,6 +69,12 @@ export const sendFriendRequest = async (req, res) => {
       return res.status(400).json({ message: "You cannot add yourself" });
     }
 
+    // Validate receiver exists
+    const receiver = await User.findById(receiverId).select("_id");
+    if (!receiver) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
     // Check if already friends
     const me = await User.findById(senderId).select("friends");
     if (me.friends.some((f) => f.toString() === receiverId)) {

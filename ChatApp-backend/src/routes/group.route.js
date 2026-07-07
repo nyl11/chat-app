@@ -9,6 +9,9 @@ import {
   getGroupMessages,
   sendGroupMessage,
   deleteGroup,
+  getMembersKeys,
+  distributeKey,
+  getPendingKeys,
 } from "../controllers/group.controller.js";
 
 const router = express.Router();
@@ -34,5 +37,13 @@ router.post("/:groupId/messages", protectRoute, sendGroupMessage);
 
 // Delete a group (admin only)
 router.delete("/:groupId", protectRoute, deleteGroup);
+
+// ── E2EE Key Distribution ─────────────────────────────────────────────────
+// Get public keys of all members (so sender can wrap their Sender Key)
+router.get("/:groupId/members-keys", protectRoute, getMembersKeys);
+// Upload wrapped sender keys for all recipients
+router.post("/:groupId/distribute-key", protectRoute, distributeKey);
+// Fetch undelivered wrapped keys addressed to me
+router.get("/:groupId/pending-keys", protectRoute, getPendingKeys);
 
 export default router;
