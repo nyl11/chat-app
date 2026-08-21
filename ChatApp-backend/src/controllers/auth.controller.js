@@ -7,7 +7,7 @@ export const signup =async (req,res)=>{
     const{fullName,email,password}=req.body
     try{
         if(!fullName || !email || !password){
-             return res.status(400).json({message:"fill all the feilds"})
+             return res.status(400).json({message:"fill all the fields"})
         }
 
         if(password.length<6){
@@ -16,7 +16,7 @@ export const signup =async (req,res)=>{
 
         const user = await User.findOne({email})
 
-        if(user) return res.status(400).json({message:"email already exixts"});
+        if(user) return res.status(400).json({message:"email already exists"});
 
         const salt = await bcrypt.genSalt(10)
         const hashedPassword= await bcrypt.hash(password,salt)
@@ -55,12 +55,12 @@ export const login = async (req,res)=>{
         const user = await User.findOne({email});
 
         if(!user){
-            return res.status(400).json({mesage:"invalid credentials"});
+            return res.status(400).json({message:"invalid credentials"});
         }
 
         const isCorrectPassword = await bcrypt.compare(password, user.password);
         if(!isCorrectPassword){
-             return res.status(400).json({mesage:"invalid credentials"});
+             return res.status(400).json({message:"invalid credentials"});
         }
 
         generateToken(user._id,res)// the only purpose of res here is to generate cookie
@@ -85,7 +85,7 @@ export const login = async (req,res)=>{
 export const logout =(req,res)=>{
   try{
     res.cookie("jwt","",{maxAge:0})
-    res.status(200).json({message:"logged out sucessfully"})
+    res.status(200).json({message:"logged out successfully"})
   }catch(error){
     console.log("error in logout controller", error.message)
   }

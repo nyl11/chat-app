@@ -35,8 +35,8 @@ export const getMessages = async (req, res) => {
 
         const message = await Message.find({
             $or: [
-                { senderId: myId, reciverId: userToChatId },
-                { senderId: userToChatId, reciverId: myId }
+                { senderId: myId, receiverId: userToChatId },
+                { senderId: userToChatId, receiverId: myId }
             ]
         })
 
@@ -51,13 +51,13 @@ export const getMessages = async (req, res) => {
 export const sendMessages = async (req, res) => {
     try {
         const { text, image, iv, mac, isEncrypted } = req.body;
-        const { id: reciverId } = req.params;
+        const { id: receiverId } = req.params;
         const senderId = req.user._id;
 
         // Friend guard — only friends can send each other DMs
         const me = await User.findById(senderId).select("friends");
         const isFriend = me.friends.some(
-            (fId) => fId.toString() === reciverId
+            (fId) => fId.toString() === receiverId
         );
         if (!isFriend) {
             return res.status(403).json({ message: "You can only chat with friends" });
@@ -72,7 +72,7 @@ export const sendMessages = async (req, res) => {
 
         const newMessage = new Message({
             senderId,
-            reciverId,
+            receiverId,
             text,
             image: imageUrl,
             iv: iv || null,
@@ -83,7 +83,7 @@ export const sendMessages = async (req, res) => {
         await newMessage.save();
 
         //realtime message functionality 
-        const receiverSocketId = getReceiverSocketId(reciverId);
+        const receiverSocketId = getReceiverSocketId(receiverId);
         if (receiverSocketId) {
             io.to(receiverSocketId).emit("newMessage", newMessage);
         }
