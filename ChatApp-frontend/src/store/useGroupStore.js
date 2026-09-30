@@ -10,6 +10,7 @@ import {
   joinGroupApi,
   leaveGroupApi,
   deleteGroupApi,
+  publishPublicKeyApi,
 } from "../api/groupApi";
 import {
   tryDecryptMessage,
@@ -17,7 +18,49 @@ import {
   fetchAndStoreKeys,
   distributeOurSenderKey,
 } from "../lib/groupCryptoOps";
-import { getOrCreateSenderKey } from "../lib/cryptoEngine";
+import { getOrCreateSenderKey, getOrCreateGroupKeyPair } from "../lib/cryptoEngine";
+
+// ─── Helper: re-attempt decryption of locked messages already in state ──────
+// Called after a new sender key is stored so any previously locked messages
+// from that sender are decrypted without requiring a full message reload.
+async function retryLockedMessages(get, set, groupId) {
+  const messages = get().groupMessages;
+  const locked = messages.filter(
+    (m) =>
+      m.isEncrypted &&
+      (m.text === "🔒 [key not yet received]" || m.text === "⚠️ [decryption failed]")
+  );
+  if (locked.length === 0) return;
+  const updated = await Promise.all(
+    messages.map((m) => {
+      const isPending =
+        m.isEncrypted &&
+        (m.text === "🔒 [key not yet received]" || m.text === "⚠️ [decryption failed]");
+      return isPending ? tryDecryptMessage(m) : m;
+    })
+  );
+  set({ groupMessages: updated });
+}
+
+// ─── Helper: attempt decryption with up to `attempts` retries spaced `ms` ms ─
+// Used in the newGroupMessage socket handler to tolerate the race between
+// key-distribution and message-delivery socket events.
+async function decryptWithRetry(msg, attempts = 4, delayMs = 600) {
+  for (let i = 0; i < attempts; i++) {
+    const result = await tryDecryptMessage(msg);
+    if (
+      result.text !== "🔒 [key not yet received]" &&
+      result.text !== "⚠️ [decryption failed]"
+    ) {
+      return result;
+    }
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  // Return the best attempt (may still be locked — will be re-tried on newSenderKeyDistributed)
+  return tryDecryptMessage(msg);
+}
 
 // ─── Store ─────────────────────────────────────────────────────────────────
 
@@ -84,6 +127,11 @@ export const useGroupStore = create((set, get) => ({
     set({ isLoadingMessages: true });
     try {
       await get().fetchAndStorePendingKeys(groupId);
+      // Proactively distribute our sender key so other/new members have it
+      get().distributeSenderKey(groupId);
+      // Ask online group members to distribute their keys if needed
+      get().requestGroupKeys(groupId);
+
       const raw = await fetchGroupMessagesApi(groupId);
       const decrypted = await Promise.all(
         raw.map((msg) => tryDecryptMessage({ ...msg, groupId }))
@@ -106,6 +154,19 @@ export const useGroupStore = create((set, get) => ({
         myGroups: [group, ...state.myGroups],
         allGroups: [group, ...state.allGroups],
       }));
+
+      // Fix #1: Publish our public key immediately so other members who join
+      // can verify and unwrap any sender keys we distribute to them.
+      const authUser = useAuthStore.getState().authUser;
+      if (authUser) {
+        try {
+          const { publicKeyB64 } = await getOrCreateGroupKeyPair(authUser._id);
+          await publishPublicKeyApi(publicKeyB64);
+        } catch (e) {
+          console.warn("[E2EE] Could not publish public key after createGroup:", e.message);
+        }
+      }
+
       return group;
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to create group");
@@ -159,7 +220,7 @@ export const useGroupStore = create((set, get) => ({
   },
 
   sendGroupMessage: async (messageData) => {
-    const { selectedGroup, groupMessages } = get();
+    const { selectedGroup } = get();
     const authUser = useAuthStore.getState().authUser;
     if (!authUser || !selectedGroup) return;
 
@@ -178,7 +239,11 @@ export const useGroupStore = create((set, get) => ({
         ? { ...saved, text: messageData.text, groupId }
         : { ...saved, groupId };
 
-      set({ groupMessages: [...groupMessages, displayMsg] });
+      set((state) => {
+        const exists = state.groupMessages.some((m) => m._id === displayMsg._id);
+        if (exists) return state;
+        return { groupMessages: [...state.groupMessages, displayMsg] };
+      });
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to send message");
     }
@@ -194,23 +259,44 @@ export const useGroupStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
     if (!socket) return;
 
+    // Prevent duplicate listeners
+    get().unsubscribeFromGroupMessages();
+
     socket.on("newGroupMessage", async (message) => {
-      if (message.groupId !== selectedGroup._id) return;
+      const currentGroup = get().selectedGroup;
+      if (!currentGroup || message.groupId !== currentGroup._id) return;
+
+      // Sender already has their own message added in sendGroupMessage
+      const authUser = useAuthStore.getState().authUser;
+      const senderIdStr = (message.senderId?._id || message.senderId)?.toString();
+      if (authUser && senderIdStr === authUser._id?.toString()) return;
 
       const alreadyExists = get().groupMessages.some((m) => m._id === message._id);
       if (alreadyExists) return;
 
-      const decrypted = await tryDecryptMessage({
-        ...message,
-        groupId: message.groupId,
+      // Fix #2: Use retry-with-backoff to tolerate the race between
+      // newSenderKeyDistributed and newGroupMessage socket events.
+      // The key distribution POST completes before the message POST on the
+      // sender side, but socket delivery order is not guaranteed on the
+      // recipient side — the key store write (HTTP + unwrap + IndexedDB)
+      // may not be done when the message arrives.
+      const msgWithGroup = { ...message, groupId: message.groupId };
+      const decrypted = await decryptWithRetry(msgWithGroup);
+
+      set((state) => {
+        const exists = state.groupMessages.some((m) => m._id === decrypted._id);
+        if (exists) return state;
+        return { groupMessages: [...state.groupMessages, decrypted] };
       });
-      set({ groupMessages: [...get().groupMessages, decrypted] });
     });
 
-    socket.on("userJoinedGroup", ({ groupId }) => {
-      if (groupId === selectedGroup?._id) {
+    socket.on("userJoinedGroup", async ({ groupId }) => {
+      const current = get().selectedGroup;
+      if (groupId === current?._id) {
         get().fetchMyGroups();
         get().fetchAllGroups();
+        // Immediately share our sender key with the new member
+        await get().distributeSenderKey(groupId);
       }
     });
 
@@ -221,26 +307,29 @@ export const useGroupStore = create((set, get) => ({
       }
     });
 
-    // Re-decrypt messages that failed due to a missing key.
-    // Re-attempt ALL locked/failed messages (not just from a specific sender)
-    // to avoid brittle senderId string-vs-ObjectId comparison issues.
+    // When another member requests keys for this group, share our key
+    socket.on("requestGroupKeys", async ({ groupId }) => {
+      const current = get().selectedGroup;
+      if (groupId === current?._id) {
+        await get().distributeSenderKey(groupId);
+      }
+    });
+
+    // Fix #4: Re-decrypt ALL locked messages when a new sender key arrives.
+    // Also handles the case where newGroupMessage arrived AFTER
+    // newSenderKeyDistributed (event reordering) — those messages were
+    // appended locked and need another pass once the key is confirmed stored.
     socket.on("newSenderKeyDistributed", async ({ groupId }) => {
       if (groupId !== selectedGroup?._id) return;
       await get().fetchAndStorePendingKeys(groupId);
-
-      const updated = await Promise.all(
-        get().groupMessages.map((m) => {
-          const isPending =
-            m.text === "🔒 [key not yet received]" ||
-            m.text === "⚠️ [decryption failed]";
-          if (m.isEncrypted && isPending) {
-            return tryDecryptMessage(m);
-          }
-          return m;
-        })
-      );
-      set({ groupMessages: updated });
+      await retryLockedMessages(get, set, groupId);
     });
+  },
+
+  requestGroupKeys: (groupId) => {
+    const socket = useAuthStore.getState().socket;
+    if (!socket) return;
+    socket.emit("requestGroupKeys", { groupId });
   },
 
   unsubscribeFromGroupMessages: () => {
@@ -249,6 +338,7 @@ export const useGroupStore = create((set, get) => ({
     socket.off("newGroupMessage");
     socket.off("userJoinedGroup");
     socket.off("userLeftGroup");
+    socket.off("requestGroupKeys");
     socket.off("newSenderKeyDistributed");
   },
 }));

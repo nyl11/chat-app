@@ -21,12 +21,14 @@ export const createGroup = async (req, res) => {
       avatarUrl = upload.secure_url;
     }
 
+    const now = new Date();
     const group = await Group.create({
       name: name.trim(),
       description: description?.trim() || "",
       avatar: avatarUrl,
       admin: adminId,
       members: [adminId],
+      memberJoinDates: { [adminId.toString()]: now },
     });
 
     const populated = await Group.findById(group._id)
@@ -89,6 +91,8 @@ export const joinGroup = async (req, res) => {
     }
 
     group.members.push(myId);
+    if (!group.memberJoinDates) group.memberJoinDates = new Map();
+    group.memberJoinDates.set(myId.toString(), new Date());
     await group.save();
 
     const populated = await Group.findById(groupId)
@@ -148,6 +152,9 @@ export const leaveGroup = async (req, res) => {
     group.members = group.members.filter(
       (m) => m.toString() !== myId.toString()
     );
+    if (group.memberJoinDates) {
+      group.memberJoinDates.delete(myId.toString());
+    }
 
     // If no members left, delete the group
     if (group.members.length === 0) {
@@ -197,7 +204,16 @@ export const getGroupMessages = async (req, res) => {
       return res.status(403).json({ message: "You are not a member of this group" });
     }
 
-    const messages = await GroupMessage.find({ groupId })
+    // Backward Secrecy: Only return messages sent after the user joined the group
+    let userJoinedAt = group.memberJoinDates?.get(myId.toString());
+    const query = { groupId };
+    if (userJoinedAt) {
+      query.createdAt = { $gte: userJoinedAt };
+    } else if (group.admin.toString() === myId.toString()) {
+      query.createdAt = { $gte: group.createdAt };
+    }
+
+    const messages = await GroupMessage.find(query)
       .populate("senderId", "-password") // publicKey is included (not password-excluded)
       .sort({ createdAt: 1 });
 
@@ -246,8 +262,9 @@ export const sendGroupMessage = async (req, res) => {
       "-password"
     );
 
-    // Emit to all group members
+    // Emit to all other group members (sender receives the message via HTTP response)
     group.members.forEach((memberId) => {
+      if (memberId.toString() === senderId.toString()) return;
       const socketId = getReceiverSocketId(memberId.toString());
       if (socketId) {
         io.to(socketId).emit("newGroupMessage", populated);
@@ -362,8 +379,13 @@ export const distributeKey = async (req, res) => {
 };
 
 // GET /groups/:groupId/pending-keys
-// Returns all undelivered wrapped Sender Keys addressed to the current user.
-// Marks each record as delivered immediately so they are not re-sent.
+// Returns all wrapped Sender Keys addressed to the current user for this group.
+// Fix #3: We intentionally do NOT filter on delivered:false and do NOT mark
+// records as delivered before the client confirms successful storage.
+// storeSenderKey() on the client is idempotent (same key overwrites itself in
+// IndexedDB), so re-delivering keys on every load is safe and prevents
+// permanent key loss if the client crashed, refreshed, or had a MAC error
+// during a previous fetch.
 // Response: [{ senderId, senderPublicKey, encryptedKey, nonce, mac }]
 export const getPendingKeys = async (req, res) => {
   try {
@@ -373,14 +395,9 @@ export const getPendingKeys = async (req, res) => {
     const pending = await GroupKeyDistribution.find({
       groupId,
       recipientId: myId,
-      delivered: false,
     }).populate("senderId", "publicKey");
 
     if (pending.length === 0) return res.status(200).json([]);
-
-    // Mark as delivered before responding (best-effort)
-    const ids = pending.map((r) => r._id);
-    await GroupKeyDistribution.updateMany({ _id: { $in: ids } }, { delivered: true });
 
     const result = pending.map((r) => ({
       senderId:        r.senderId._id.toString(),

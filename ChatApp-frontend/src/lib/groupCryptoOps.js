@@ -37,10 +37,10 @@ export function deriveSharedWith(myPrivateScalar, theirPublicKeyB64) {
  */
 export async function tryDecryptMessage(msg) {
   if (!msg.isEncrypted || !msg.text) return msg;
-  const senderId =
-    typeof msg.senderId === "object" ? msg.senderId._id : msg.senderId;
+  const senderId = (msg.senderId?._id || msg.senderId)?.toString();
+  const groupId = (msg.groupId?._id || msg.groupId || msg.group)?.toString();
   try {
-    const sk = await loadSenderKey(senderId, msg.groupId || msg.group);
+    const sk = await loadSenderKey(senderId, groupId);
     if (!sk) return { ...msg, text: "🔒 [key not yet received]" };
     const plain = decryptGroupMessage(sk, msg.text, msg.iv, msg.mac);
     return { ...msg, text: plain };
@@ -115,7 +115,7 @@ export async function distributeOurSenderKey(authUser, groupId, recipientList) {
 
   const payload = [];
   for (const member of members) {
-    if (member.userId === authUser._id) continue; // skip self
+    if (member.userId?.toString() === authUser._id?.toString()) continue; // skip self
     if (!member.publicKey) continue;              // skip members without a registered key
     try {
       const sharedSecret = deriveSharedWith(privateScalar, member.publicKey);

@@ -27,6 +27,11 @@ const groupSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    memberJoinDates: {
+      type: Map,
+      of: Date,
+      default: () => new Map(),
+    },
   },
   { timestamps: true }
 );

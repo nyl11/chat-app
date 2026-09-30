@@ -1,11 +1,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // cryptoEngine.js — Pure-JavaScript Group E2EE Engine
 //
-// Crypto stack (all from scratch, zero Web Crypto subtle, zero external libs):
 //   AES-128-CTR  ·  SHA-256  ·  HMAC-SHA-256  ·  HKDF (RFC 5869)
 //   ECDH on NIST P-256  ·  Sender Key group encryption pattern
 //
-// Only crypto.getRandomValues() is used (CSPRNG, not part of subtle).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════

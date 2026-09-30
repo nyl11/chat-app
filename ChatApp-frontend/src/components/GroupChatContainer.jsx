@@ -89,8 +89,8 @@ const GroupChatContainer = () => {
         )}
         {groupMessages.map((message, idx) => {
           const isMe =
-            message.senderId?._id === authUser._id ||
-            message.senderId === authUser._id;
+            (message.senderId?._id || message.senderId)?.toString() ===
+            authUser?._id?.toString();
 
           const sender = typeof message.senderId === "object" ? message.senderId : null;
 
@@ -113,17 +113,14 @@ const GroupChatContainer = () => {
                 </div>
               </div>
 
-              {/* Show sender name for others */}
-              {!isMe && sender && (
-                <div className="chat-header mb-1">
+              {/* Header with sender name (if not me) and timestamp */}
+              <div className="chat-header mb-1 flex items-center gap-1.5">
+                {!isMe && (
                   <span className="text-xs font-semibold text-primary">
-                    {sender.fullName}
+                    {sender?.fullName || "Member"}
                   </span>
-                </div>
-              )}
-
-              <div className="chat-header mb-1">
-                <time className="text-xs opacity-50 ml-1">
+                )}
+                <time className="text-xs opacity-50">
                   {formatDistanceToNow(new Date(message.createdAt), {
                     addSuffix: true,
                   })}
